@@ -10,7 +10,10 @@ All classes use beartype for runtime type enforcement.
 Memory tracking via psutil is mandatory.
 """
 
+import cProfile
+import io
 import json
+import pstats
 import threading
 import time
 from collections import defaultdict
@@ -415,3 +418,70 @@ def profile_operation(
             memory_delta=timer.memory_delta,
             peak_memory=timer.peak_memory,
         )
+
+
+_VALID_SORT_KEYS = frozenset(
+    member.value for member in pstats.SortKey
+)
+
+
+@beartype
+@contextmanager
+def profile_callgraph(
+    top_n: int = 20,
+    sort_by: str = "cumulative",
+    output_path: Path | None = None,
+) -> Generator[cProfile.Profile, None, None]:
+    """Context manager for automatic call-graph profiling via cProfile.
+
+    Wraps a code block with cProfile to capture the full call graph. On exit,
+    prints the top N functions sorted by the chosen key. Optionally dumps a
+    binary .prof file for visualization with snakeviz or gprof2dot.
+
+    This is orthogonal to ComponentTimer/AccumulatingTimer: those measure
+    wall-clock time for specific blocks you instrument manually. This reveals
+    *which sub-functions* inside those blocks consume time.
+
+    Args:
+        top_n: Number of top functions to print in the summary (must be > 0)
+        sort_by: pstats sort key — one of: calls, cumulative, filename, line,
+            name, nfl, pcalls, stdname, time
+        output_path: If provided, dump binary .prof file to this path
+
+    Yields:
+        The cProfile.Profile object (for advanced inspection if needed)
+
+    Example:
+        with profile_callgraph(top_n=30, sort_by="cumulative") as prof:
+            run_backtest()
+        # Prints top 30 functions by cumulative time
+
+        # With file output for snakeviz:
+        with profile_callgraph(output_path=Path("backtest.prof")):
+            run_backtest()
+        # Then: snakeviz backtest.prof
+    """
+    assert top_n > 0, f"top_n must be positive, got {top_n}"
+    assert sort_by in _VALID_SORT_KEYS, (
+        f"Invalid sort_by='{sort_by}'. Must be one of: {sorted(_VALID_SORT_KEYS)}"
+    )
+
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        yield profiler
+    finally:
+        profiler.disable()
+
+        logger.info(f"[cProfile] Top {top_n} functions by '{sort_by}':")
+
+        stream = io.StringIO()
+        stats = pstats.Stats(profiler, stream=stream)
+        stats.sort_stats(sort_by)
+        stats.print_stats(top_n)
+        print(stream.getvalue())
+
+        if output_path is not None:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            profiler.dump_stats(str(output_path))
+            logger.info(f"[cProfile] Profile dumped to {output_path}")

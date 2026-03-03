@@ -16,6 +16,7 @@ from blkarbs_profiling import (
     AccumulatingTimer,
     ComponentTimer,
     ProfilingSession,
+    profile_callgraph,
     profile_operation,
 )
 
@@ -325,3 +326,67 @@ class TestProfileOperation:
 
         assert timer.memory_delta == 0.0
         assert timer.peak_memory == 0.0
+
+
+# ---------------------------------------------------------------------------
+# profile_callgraph
+# ---------------------------------------------------------------------------
+
+def _dummy_work() -> int:
+    """Deterministic function that cProfile can capture."""
+    total = 0
+    for i in range(100):
+        total += i
+    return total
+
+
+class TestProfileCallgraph:
+    def test_profiles_code_and_prints_stats(self, capsys):
+        with profile_callgraph(top_n=10, sort_by="cumulative"):
+            _dummy_work()
+
+        captured = capsys.readouterr()
+        assert "function calls" in captured.out
+        assert "_dummy_work" in captured.out
+
+    def test_dumps_prof_file_when_output_path_provided(self, tmp_path: Path):
+        out = tmp_path / "test.prof"
+        with profile_callgraph(top_n=5, sort_by="time", output_path=out):
+            _dummy_work()
+
+        assert out.exists()
+        assert out.stat().st_size > 0
+
+    def test_output_path_none_does_not_create_file(self, tmp_path: Path):
+        with profile_callgraph(top_n=5, sort_by="cumulative"):
+            _dummy_work()
+
+        # No .prof files should exist in tmp_path
+        prof_files = list(tmp_path.glob("*.prof"))
+        assert len(prof_files) == 0
+
+    def test_invalid_sort_by_raises(self):
+        with pytest.raises(AssertionError, match="Invalid sort_by"):
+            with profile_callgraph(sort_by="bogus"):
+                pass
+
+    def test_invalid_top_n_raises(self):
+        with pytest.raises(AssertionError, match="top_n must be positive"):
+            with profile_callgraph(top_n=0):
+                pass
+
+    def test_yields_profile_object(self):
+        import cProfile
+
+        with profile_callgraph(top_n=5, sort_by="calls") as prof:
+            _dummy_work()
+
+        assert isinstance(prof, cProfile.Profile)
+        # Verify stats are accessible
+        stats = prof.getstats()
+        assert len(stats) > 0
+
+    def test_beartype_rejects_wrong_types(self):
+        with pytest.raises(BeartypeCallHintParamViolation):
+            with profile_callgraph(top_n="ten"):
+                pass

@@ -120,6 +120,124 @@ session.log_checkpoint("After Step 1")
 #   Step 1: 30.00s, 500 items (16.7/s), peak=4.20GB, Δ=+1.30GB
 ```
 
+### Find out which functions are slow (cProfile call graph)
+
+`ComponentTimer` tells you *how long* a block takes. `profile_callgraph` tells you *why* it's slow — which sub-functions inside that block consume the time.
+
+```python
+from blkarbs_profiling import profile_callgraph
+
+with profile_callgraph(top_n=15, sort_by="cumulative"):
+    run_backtest()
+```
+
+Output:
+
+```
+[cProfile] Top 15 functions by 'cumulative':
+         84923 function calls in 2.341 seconds
+
+   Ordered by: cumulative time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    2.341    2.341 backtest.py:42(run_backtest)
+     5000    1.102    0.000    1.891    0.000 strategy.py:18(on_price)
+     5000    0.789    0.000    0.789    0.000 indicators.py:55(calc_ema)
+     ...
+```
+
+Now you know `calc_ema` is the bottleneck — something `ComponentTimer` alone cannot reveal.
+
+#### Save a .prof file for visualization
+
+```python
+from pathlib import Path
+from blkarbs_profiling import profile_callgraph
+
+with profile_callgraph(top_n=20, sort_by="time", output_path=Path("backtest.prof")):
+    run_backtest()
+```
+
+Then open it with snakeviz:
+
+```bash
+pip install snakeviz
+snakeviz backtest.prof
+```
+
+Or generate a call graph image with gprof2dot:
+
+```bash
+pip install gprof2dot
+gprof2dot -f pstats backtest.prof | dot -Tpng -o callgraph.png
+```
+
+#### Sort keys
+
+The `sort_by` parameter accepts any valid `pstats.SortKey` value:
+
+| Key | What it sorts by |
+|---|---|
+| `"cumulative"` | Total time spent in function + its callees (default) |
+| `"time"` | Time spent in the function itself (excludes callees) |
+| `"calls"` | Number of times the function was called |
+| `"name"` | Function name alphabetically |
+| `"filename"` | Source file name |
+
+Use `"cumulative"` to find the slow code path from the top down. Use `"time"` to find the single hottest function.
+
+### Combining tools: the full picture
+
+Each tool answers a different question. Use them together to go from "this is slow" to "here's exactly why."
+
+```python
+from pathlib import Path
+from blkarbs_profiling import (
+    ProfilingSession,
+    AccumulatingTimer,
+    profile_callgraph,
+    profile_operation,
+)
+
+session = ProfilingSession()
+
+# 1. profile_callgraph: wrap the entire pipeline to get the call graph
+with profile_callgraph(top_n=30, sort_by="cumulative", output_path=Path("pipeline.prof")):
+
+    # 2. profile_operation: time coarse-grained steps with memory tracking
+    with profile_operation("Data Loading", session, count=1):
+        data = load_data()
+
+    # 3. AccumulatingTimer: time the hot loop with minimal overhead
+    signal_timer = AccumulatingTimer("Signal Generation")
+    for bar in data.itertuples():
+        with signal_timer:
+            strategy.on_price(bar)
+    signal_timer.flush(session)
+
+    with profile_operation("Risk Calculation", session, count=len(data)):
+        risk = calculate_risk(strategy.positions)
+
+# 4. ProfilingSession: get the summary table
+session.print_summary("Full Pipeline")
+# Then: snakeviz pipeline.prof  — to drill into whichever step is slowest
+```
+
+What each layer tells you:
+
+| Tool | Question it answers |
+|---|---|
+| `ProfilingSession` table | "Which *step* is slowest? How much memory did each use?" |
+| `AccumulatingTimer` | "How much total time does this hot loop burn, at near-zero overhead?" |
+| `profile_callgraph` | "Which *sub-function* inside the slow step is the actual bottleneck?" |
+| `.prof` file + snakeviz | "Show me the full call graph visually so I can trace the hot path." |
+
+Typical workflow:
+
+1. Run with `ProfilingSession` — identify that "Signal Generation" takes 80% of time.
+2. Wrap the pipeline with `profile_callgraph` — discover that `calc_ema()` inside `on_price()` is the bottleneck.
+3. Optimize `calc_ema()`, re-run, verify the time dropped in both the session table and the call graph.
+
 ### Save results to a file
 
 ```python
@@ -138,6 +256,7 @@ Writes a JSON file with all the metrics. Useful for comparing runs or feeding in
 | `AccumulatingTimer` | Ultra-fast timer for tight loops. No memory tracking. |
 | `ProfilingSession` | Collects timing from multiple steps. Thread-safe. |
 | `profile_operation()` | Shortcut: wraps `ComponentTimer` + auto-records to a session. |
+| `profile_callgraph()` | cProfile wrapper — reveals which sub-functions are slow. Dumps `.prof` files. |
 
 ## Dev setup
 

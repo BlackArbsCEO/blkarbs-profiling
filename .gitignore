@@ -1,9 +1,86 @@
+# Python
 __pycache__/
 *.py[cod]
-*.egg-info/
-dist/
+*$py.class
+*.so
+.Python
 build/
-.pytest_cache/
-.ruff_cache/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
 *.egg
-.venv/
+MANIFEST
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Linting
+.ruff_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# AI Workspace - Entire directory excluded from version control
+.ai_workspace/
+
+# MCP config (local server paths)
+.mcp.json
+
+# Serena MCP local data
+.serena/
+
+# Logs (root level)
+*.log
+
+# Backup directories
+.ai_workspace_backup_*/
+*_backup_*/
+
+# Coverage and benchmark artifacts
+coverage.json
+benchmark_results*.json
+
+# Orphaned task files
+checkpoint.yaml
+task_complete.yaml

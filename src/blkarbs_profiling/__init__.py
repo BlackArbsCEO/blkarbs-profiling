@@ -23,6 +23,7 @@ from blkarbs_profiling._core import (
     AccumulatingTimer,
     ComponentTimer,
     ProfilingSession,
+    profile_callgraph,
     profile_operation,
 )
 
@@ -30,7 +31,8 @@ __all__ = [
     "AccumulatingTimer",
     "ComponentTimer",
     "ProfilingSession",
+    "profile_callgraph",
     "profile_operation",
 ]
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
