@@ -27,7 +27,12 @@ with ComponentTimer() as timer:
 
 print(f"Took {timer.elapsed:.2f} seconds")
 print(f"Used {timer.memory_delta:.2f} GB of memory")
+print(f"Peak RSS: {timer.peak_memory:.2f} GB")
+print(f"End RSS: {timer.end_memory:.2f} GB")
 ```
+
+`peak_memory` is the sampled peak process RSS during the block. `end_memory` is the
+process RSS at the end of the block.
 
 ### Track multiple steps and get a summary table
 

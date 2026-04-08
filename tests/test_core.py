@@ -8,6 +8,7 @@ import json
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from beartype.roar import BeartypeCallHintParamViolation
@@ -47,6 +48,30 @@ class TestComponentTimer:
     def test_beartype_rejects_non_bool_track_memory(self):
         with pytest.raises(BeartypeCallHintParamViolation):
             ComponentTimer(track_memory="yes")
+
+    def test_memory_tracking_uses_sampled_peak_not_end_rss(self, monkeypatch):
+        rss_values_gb = [1.0, 3.0, 2.0, 2.0]
+        state = {"index": 0}
+
+        class FakeProcess:
+            def memory_info(self):
+                index = min(state["index"], len(rss_values_gb) - 1)
+                value = rss_values_gb[index]
+                state["index"] += 1
+                return SimpleNamespace(rss=value * 1024**3)
+
+        monkeypatch.setattr("blkarbs_profiling._core.psutil.Process", lambda: FakeProcess())
+        monkeypatch.setattr(
+            "blkarbs_profiling._core.psutil.virtual_memory",
+            lambda: SimpleNamespace(percent=42.0),
+        )
+
+        with ComponentTimer(track_memory=True, sample_interval_seconds=0.001) as timer:
+            time.sleep(0.01)
+
+        assert timer.memory_delta == pytest.approx(1.0)
+        assert timer.end_memory == pytest.approx(2.0)
+        assert timer.peak_memory == pytest.approx(3.0)
 
 
 # ---------------------------------------------------------------------------

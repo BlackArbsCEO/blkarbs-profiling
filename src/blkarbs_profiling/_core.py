@@ -36,7 +36,8 @@ class ComponentTimer:
     Attributes:
         elapsed: Time elapsed in seconds (MUST be >= 0)
         memory_delta: Change in process memory (GB)
-        peak_memory: Peak process memory during operation (GB)
+        peak_memory: Peak sampled process memory during operation (GB)
+        end_memory: Process memory at end of operation (GB)
         system_memory_before: System memory usage % at start
         system_memory_after: System memory usage % at end
 
@@ -52,15 +53,27 @@ class ComponentTimer:
     """
 
     @beartype
-    def __init__(self, track_memory: bool = True) -> None:
+    def __init__(
+        self,
+        track_memory: bool = True,
+        sample_interval_seconds: float = 0.05,
+    ) -> None:
+        assert sample_interval_seconds > 0, (
+            "sample_interval_seconds must be > 0."
+        )
         self.track_memory = track_memory
+        self.sample_interval_seconds = sample_interval_seconds
         self.elapsed: float = 0.0
         self.memory_delta: float = 0.0
         self.peak_memory: float = 0.0
+        self.end_memory: float = 0.0
         self.system_memory_before: float = 0.0
         self.system_memory_after: float = 0.0
         self._start: float = 0.0
         self._start_memory: float = 0.0
+        self._peak_memory_observed: float = 0.0
+        self._memory_sampler_thread: threading.Thread | None = None
+        self._memory_sampler_stop = threading.Event()
 
     def __enter__(self) -> "ComponentTimer":
         self._start = time.time()
@@ -68,7 +81,15 @@ class ComponentTimer:
         if self.track_memory:
             process = psutil.Process()
             self._start_memory = process.memory_info().rss / 1024**3  # GB
+            self._peak_memory_observed = self._start_memory
             self.system_memory_before = psutil.virtual_memory().percent
+            self._memory_sampler_stop.clear()
+            self._memory_sampler_thread = threading.Thread(
+                target=self._sample_peak_memory,
+                name="blkarbs-profiling-memory-sampler",
+                daemon=True,
+            )
+            self._memory_sampler_thread.start()
 
         return self
 
@@ -82,16 +103,27 @@ class ComponentTimer:
         )
 
         if self.track_memory:
+            self._memory_sampler_stop.set()
+            if self._memory_sampler_thread is not None:
+                self._memory_sampler_thread.join(timeout=max(1.0, self.sample_interval_seconds * 4))
             process = psutil.Process()
             end_memory = process.memory_info().rss / 1024**3  # GB
             self.system_memory_after = psutil.virtual_memory().percent
 
+            self.end_memory = end_memory
             self.memory_delta = end_memory - self._start_memory
-            self.peak_memory = end_memory
+            self.peak_memory = max(self._peak_memory_observed, end_memory)
 
             assert self.peak_memory >= 0, (
                 f"Peak memory cannot be negative: {self.peak_memory:.2f}GB"
             )
+
+    def _sample_peak_memory(self) -> None:
+        while not self._memory_sampler_stop.wait(self.sample_interval_seconds):
+            process = psutil.Process()
+            observed_memory = process.memory_info().rss / 1024**3  # GB
+            if observed_memory > self._peak_memory_observed:
+                self._peak_memory_observed = observed_memory
 
 
 class AccumulatingTimer:

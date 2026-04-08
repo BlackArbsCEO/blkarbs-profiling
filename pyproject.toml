@@ -1,6 +1,6 @@
 [project]
 name = "blkarbs-profiling"
-version = "0.2.0"
+version = "0.2.1"
 description = "Reusable timing, throughput, and memory profiling utilities"
 readme = "README.md"
 requires-python = ">=3.12"
